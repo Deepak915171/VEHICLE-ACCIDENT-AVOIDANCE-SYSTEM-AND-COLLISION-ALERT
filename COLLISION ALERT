@@ -1,0 +1,168 @@
+#include <SoftwareSerial.h>
+
+// Define pins
+#define GSM_RX 7
+#define GSM_TX 5
+#define GPS_RX 4
+#define GPS_TX 3
+#define VIBRATION_PIN 2
+
+// Serial instances
+SoftwareSerial sim800L(GSM_RX, GSM_TX);    // GSM module
+SoftwareSerial gpsSerial(GPS_RX, GPS_TX);  // GPS module
+
+// Global variables
+String gpsData = "";
+String latitude = "";
+String longitude = "";
+bool vibrationDetected = false;
+
+// ---------------------- Function Prototypes ----------------------
+void waitForResponse(String context = "");
+void parseGPS(String data);
+String convertToDecimal(String raw, bool isLat);
+void sendSMS(String lat, String lon);
+void makeCall(String number);
+void debug(String msg);
+// ----------------------------------------------------------------
+
+void setup() {
+  Serial.begin(9600);
+  sim800L.begin(9600);
+  gpsSerial.begin(9600);
+
+  pinMode(VIBRATION_PIN, INPUT);
+
+  debug("===== SYSTEM START =====");
+
+  sim800L.println("AT");
+  waitForResponse("AT");
+
+  sim800L.println("ATE1");
+  waitForResponse("ATE1");
+
+  sim800L.println("AT+CMGF=1");
+  waitForResponse("Set SMS Text Mode");
+
+  sim800L.println("AT+CNMI=1,2,0,0,0");
+  waitForResponse("Set SMS Notification Mode");
+
+  debug("[GPS] Waiting for valid GPS signal...");
+}
+
+void loop() {
+  // Check for vibration
+  if (digitalRead(VIBRATION_PIN) == HIGH && !vibrationDetected) {
+    debug("[VIBRATION] Detected! Attempting to send location...");
+    vibrationDetected = true;  // Prevent repeated triggers
+  }
+
+  // Read GPS data
+  while (gpsSerial.available()) {
+    char c = gpsSerial.read();
+    gpsData += c;
+
+    if (c == '\n') {
+      if (gpsData.startsWith("$GPGGA") || gpsData.startsWith("$GPRMC")) {
+        parseGPS(gpsData);
+
+        if (latitude != "" && longitude != "" && vibrationDetected) {
+          debug("[GPS] Coordinates Acquired.");
+          debug("Latitude: " + latitude);
+          debug("Longitude: " + longitude);
+          sendSMS(latitude, longitude);
+          vibrationDetected = false;  // Reset after sending
+        }
+      }
+      gpsData = "";
+    }
+  }
+
+  // GSM module incoming messages (optional)
+  if (sim800L.available()) {
+    debug("[GSM IN] " + sim800L.readString());
+  }
+
+  // Allow manual GSM commands from Serial Monitor
+  if (Serial.available()) {
+    String cmd = Serial.readString();
+    debug("[SERIAL CMD] " + cmd);
+    sim800L.println(cmd);
+  }
+}
+
+// ---------------------- Helper Functions -------------------------
+
+void waitForResponse(String context) {
+  delay(1000);
+  debug("[DEBUG] Waiting for GSM response...");
+  delay(1000);
+  if (sim800L.available()) {
+    debug("[GSM RESP] " + sim800L.readString());
+  } else {
+    debug("No response for: " + context);
+  }
+  sim800L.read();  // Clear buffer
+}
+
+void parseGPS(String data) {
+  int fieldNum = 0;
+  String token = "";
+
+  for (int i = 0; i < data.length(); i++) {
+    if (data[i] == ',' || i == data.length() - 1) {
+      fieldNum++;
+
+      if (data.startsWith("$GPGGA")) {
+        if (fieldNum == 3) latitude = convertToDecimal(token, true);
+        if (fieldNum == 5) longitude = convertToDecimal(token, false);
+      } else if (data.startsWith("$GPRMC")) {
+        if (fieldNum == 4) latitude = convertToDecimal(token, true);
+        if (fieldNum == 6) longitude = convertToDecimal(token, false);
+      }
+
+      token = "";
+    } else {
+      token += data[i];
+    }
+  }
+}
+
+String convertToDecimal(String raw, bool isLat) {
+  if (raw == "") return "";
+
+  float degrees = raw.substring(0, isLat ? 2 : 3).toFloat();
+  float minutes = raw.substring(isLat ? 2 : 3).toFloat();
+  float decimal = degrees + (minutes / 60.0);
+  return String(decimal, 6);
+}
+
+void sendSMS(String lat, String lon) {
+  String googleLink = "https://maps.google.com/?q=" + lat + "," + lon;
+
+  debug("[GSM] Sending SMS with location...");
+  debug("[GSM] " + googleLink);
+
+  sim800L.print("AT+CMGS=\"+91XXXXXXXXXX\"\r");  // Replace with your number
+  delay(1000);
+  sim800L.print("Accident detected at Current Location : " + googleLink);
+  sim800L.write(0x1A);  // CTRL+Z to send
+  waitForResponse("Send SMS");
+
+  makeCall("+91XXXXXXXXXX");
+}
+
+void makeCall(String number) {
+  debug("[GSM] Calling: " + number);
+  sim800L.print("ATD" + number + ";\r");
+  waitForResponse("Dial Call");
+  delay(20000);  // 20 seconds ring
+  sim800L.println("ATH");  // Hang up
+  waitForResponse("Hang up");
+}
+
+void debug(String msg) {
+  if (Serial) {
+    Serial.println(msg);
+  }
+}
