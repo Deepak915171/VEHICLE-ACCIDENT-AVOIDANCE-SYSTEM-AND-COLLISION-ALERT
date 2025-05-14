@@ -1,4 +1,4 @@
-//  Code started from here " VEHICLE-ACCIDENT-Alert-SYSTEM "//
+//  Code started from here " VEHICLE-ACCIDENT-ALERT-SYSTEM "//
 #include <SoftwareSerial.h>
 // Define pins
 #define GSM_RX 7
