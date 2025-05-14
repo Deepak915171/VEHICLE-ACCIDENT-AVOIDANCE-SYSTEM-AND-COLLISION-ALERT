@@ -1,2 +1,157 @@
 # VEHICLE-ACCIDENT-AVOIDANCE-SYSTEM-AND-COLLISION-ALERT
 This project presents a comprehensive vehicle safety system that integrates multiple sensor-based modules to prevent accidents and provide immediate assistance during emergencies. The primary objective is to enhance road safety by controlling vehicle operations and enabling real-time alert mechanisms
+//  Code started from here " VEHICLE-ACCIDENT-AVOIDANCE-SYSTEM "//
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <NewPing.h>
+
+// Define pins
+#define TRIG_PIN 11
+#define ECHO_PIN 12
+#define MOTOR_A_EN 5
+#define MOTOR_A_1 6
+#define MOTOR_A_2 7
+#define MOTOR_B_EN 10
+#define MOTOR_B_1 8
+#define MOTOR_B_2 9
+#define BUZZER_PIN 13
+#define BLINK_SENSOR_PIN 4
+#define MQ2_SENSOR_PIN A3
+
+// Constants
+#define MAX_DISTANCE 200
+#define MIN_DISTANCE_STOP 20
+#define MIN_DISTANCE_SLOWDOWN 50
+#define GAS_THRESHOLD 150
+#define BLINK_TIMEOUT 5000
+
+NewPing sonar(TRIG_PIN, ECHO_PIN, MAX_DISTANCE);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+unsigned long lastBlinkTime = 0;
+
+void setup() {
+  lcd.init();
+  lcd.backlight();
+
+  pinMode(MOTOR_A_EN, OUTPUT);
+  pinMode(MOTOR_A_1, OUTPUT);
+  pinMode(MOTOR_A_2, OUTPUT);
+  pinMode(MOTOR_B_EN, OUTPUT);
+  pinMode(MOTOR_B_1, OUTPUT);
+  pinMode(MOTOR_B_2, OUTPUT);
+  digitalWrite(MOTOR_A_EN, LOW);
+  digitalWrite(MOTOR_B_EN, LOW);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BLINK_SENSOR_PIN, INPUT);
+
+  Serial.begin(9600);
+  Serial.println("System Initialized");
+}
+
+void loop() {
+  int distance = sonar.ping_cm();
+  int gasLevel = analogRead(MQ2_SENSOR_PIN);
+  int blinkState = digitalRead(BLINK_SENSOR_PIN);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Distance: ");
+  lcd.print(distance);
+  lcd.print(" cm");
+
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.print(" cm | Gas: ");
+  Serial.print(gasLevel);
+  Serial.print(" | Eye: ");
+  Serial.println(blinkState == LOW ? "Closed" : "Open");
+
+  // Check MQ2 sensor
+  if (gasLevel > GAS_THRESHOLD) {
+    stopMotors();
+    soundBuzzerLong();
+    lcd.setCursor(0, 1);
+    lcd.print("FIRE/SMOKE!");
+    Serial.println("!! ALERT: Gas Detected - FIRE/SMOKE !!");
+    delay(1000);
+    return;
+  }
+
+  // Eye blink logic
+  if (blinkState == LOW) {
+    lastBlinkTime = millis();
+    lcd.setCursor(0, 1);
+    lcd.print("Blink: Eyes Closed");
+    moveForwardSlow();
+    Serial.println("Eyes closed - Slowing Down");
+  }
+
+  if (millis() - lastBlinkTime >= BLINK_TIMEOUT) {
+    soundBuzzerShort();
+    stopMotors();
+    lcd.setCursor(0, 1);
+    lcd.print("No Blink - STOP");
+    Serial.println("ALERT: No blink for 5 sec - Stopping!");
+    delay(1000);
+    return;
+  }
+
+  // Obstacle handling
+  if (distance > 0 && distance <= MIN_DISTANCE_STOP) {
+    stopMotors();
+    soundBuzzerShort();
+    lcd.setCursor(0, 1);
+    lcd.print("Obstacle Stop");
+    Serial.println("Obstacle too close - STOP!");
+  } else if (distance <= MIN_DISTANCE_SLOWDOWN) {
+    moveForwardSlow();
+    lcd.setCursor(0, 1);
+    lcd.print("Slowing Down");
+    Serial.println("Obstacle nearby - Slowing down");
+  } else {
+    moveForward();
+    lcd.setCursor(0, 1);
+    lcd.print("Moving Forward");
+    Serial.println("Path clear - Moving forward");
+  }
+
+  delay(200);
+}
+
+// Functions
+void stopMotors() {
+  digitalWrite(MOTOR_A_EN, LOW);
+  digitalWrite(MOTOR_B_EN, LOW);
+}
+
+void moveForward() {
+  digitalWrite(MOTOR_A_1, HIGH);
+  digitalWrite(MOTOR_A_2, LOW);
+  digitalWrite(MOTOR_B_1, HIGH);
+  digitalWrite(MOTOR_B_2, LOW);
+  digitalWrite(MOTOR_A_EN, HIGH);
+  digitalWrite(MOTOR_B_EN, HIGH);
+}
+
+void moveForwardSlow() {
+  analogWrite(MOTOR_A_EN, 100);
+  analogWrite(MOTOR_B_EN, 100);
+  digitalWrite(MOTOR_A_1, HIGH);
+  digitalWrite(MOTOR_A_2, LOW);
+  digitalWrite(MOTOR_B_1, HIGH);
+  digitalWrite(MOTOR_B_2, LOW);
+}
+
+void soundBuzzerShort() {
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(200);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+void soundBuzzerLong() {
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(1000);
+  digitalWrite(BUZZER_PIN, LOW);
+}
